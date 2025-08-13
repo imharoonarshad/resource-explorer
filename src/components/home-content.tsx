@@ -1,10 +1,9 @@
 'use client';
 
 import { useSearchParams, useRouter, usePathname } from 'next/navigation';
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { usePokemonSearch } from '@/hooks/use-pokemon';
 import { useInfinitePokemonList } from '@/hooks/use-infinite-pokemon';
-import { useIntersectionObserver } from '@/hooks/use-intersection-observer';
 import { useFavorites } from '@/hooks/use-favorites';
 import PokemonCard from '@/components/pokemon-card';
 import { PokemonListSkeleton } from '@/components/loading-skeleton';
@@ -30,7 +29,6 @@ export default function HomeContent() {
   const showFavorites = searchParams.get('favorites') === 'true';
   
   const { favorites } = useFavorites();
-  const { ref: loadMoreRef, isIntersecting } = useIntersectionObserver();
   
   // Debounce search query
   useEffect(() => {
@@ -57,24 +55,52 @@ export default function HomeContent() {
     error: infiniteError,
   } = useInfinitePokemonList();
   
-  // Load more when intersection observer triggers
+  // Ref to store the observer
+  const observerRef = useRef<IntersectionObserver | null>(null);
+  const loadMoreElementRef = useRef<HTMLDivElement | null>(null);
+  
+  // Setup intersection observer
   useEffect(() => {
-    console.log('Infinite scroll check:', {
-      isIntersecting,
-      hasNextPage,
-      isFetchingNextPage,
-      debouncedQuery,
-      shouldFetch: isIntersecting && hasNextPage && !isFetchingNextPage && !debouncedQuery
-    });
-    
-    if (isIntersecting && hasNextPage && !isFetchingNextPage && !debouncedQuery) {
-      const timer = setTimeout(() => {
-        console.log('Fetching next page...');
-        fetchNextPage();
-      }, 100);
-      return () => clearTimeout(timer);
+    // Cleanup previous observer
+    if (observerRef.current) {
+      observerRef.current.disconnect();
+      observerRef.current = null;
     }
-  }, [isIntersecting, hasNextPage, isFetchingNextPage, debouncedQuery, fetchNextPage]);
+    
+    // Don't set up observer if conditions aren't met
+    if (debouncedQuery || !hasNextPage || infiniteLoading) {
+      return;
+    }
+    
+    // Wait a bit after data loads before setting up observer
+    const setupTimer = setTimeout(() => {
+      if (!loadMoreElementRef.current) return;
+      
+      observerRef.current = new IntersectionObserver(
+        (entries) => {
+          const entry = entries[0];
+          if (entry && entry.isIntersecting && !isFetchingNextPage && hasNextPage) {
+            fetchNextPage();
+          }
+        },
+        {
+          root: null,
+          rootMargin: '200px',
+          threshold: 0.01
+        }
+      );
+      
+      observerRef.current.observe(loadMoreElementRef.current);
+    }, 1000); // Wait 1 second after component mounts/updates
+    
+    return () => {
+      clearTimeout(setupTimer);
+      if (observerRef.current) {
+        observerRef.current.disconnect();
+        observerRef.current = null;
+      }
+    };
+  }, [debouncedQuery, hasNextPage, infiniteLoading, isFetchingNextPage, fetchNextPage]);
   
   const isLoading = debouncedQuery ? searchLoading : infiniteLoading;
   const error = debouncedQuery ? searchError : infiniteError;
@@ -272,7 +298,7 @@ export default function HomeContent() {
               
               {/* Infinite scroll trigger */}
               {!debouncedQuery && hasNextPage && (
-                <div ref={loadMoreRef} className="flex justify-center items-center py-8">
+                <div ref={loadMoreElementRef} className="flex justify-center items-center py-8">
                   {isFetchingNextPage ? (
                     <div className="flex items-center gap-2 text-gray-600">
                       <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600"></div>

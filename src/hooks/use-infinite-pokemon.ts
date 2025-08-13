@@ -36,5 +36,7 @@ export function useInfinitePokemonList() {
       return totalLoaded < lastPage.count ? totalLoaded : undefined;
     },
     staleTime: 5 * 60 * 1000,
+    refetchOnWindowFocus: false,
+    refetchOnMount: false,
   });
 }
